@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Запись в салон</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 0; background: #f5f6fa; }
+    .container { max-width: 420px; margin: auto; padding: 16px; }
+    h1 { text-align: center; }
+    .card { background: white; border-radius: 16px; padding: 16px; margin-bottom: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+    input, select, button { width: 100%; padding: 12px; margin-top: 10px; border-radius: 10px; border: 1px solid #ddd; font-size: 16px; }
+    button { background: #6c5ce7; color: white; border: none; font-weight: bold; cursor: pointer; }
+    .times { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
+    .time-slot { padding: 10px; text-align: center; border-radius: 8px; background: #eee; cursor: pointer; }
+    .time-slot.active { background: #6c5ce7; color: white; }
+    .time-slot.disabled { background: #ccc; color: #888; cursor: not-allowed; }
+    .price { margin-top: 10px; font-weight: bold; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Запись</h1>
+
+    <div class="card">
+      <label>Услуга</label>
+      <select id="service" onchange="onServiceChange()">
+        <option value="" disabled selected>Выберите услугу</option>
+        <option value="manicure" data-duration="60" data-price="30">Маникюр (1 час)</option>
+        <option value="haircut" data-duration="60" data-price="25">Стрижка (1 час)</option>
+        <option value="coloring" data-duration="120" data-price="70">Окрашивание (2 часа)</option>
+        <option value="lashes" data-duration="90" data-price="50">Ресницы (1.5 часа)</option>
+      </select>
+
+      <div class="price" id="price"></div>
+
+      <label>Дата</label>
+      <input type="date" id="date" onchange="loadAvailability()" />
+      <div class="times" id="times"></div>
+    </div>
+
+    <div class="card">
+      <input type="text" id="name" placeholder="Ваше имя" />
+      <input type="tel" id="phone" placeholder="Телефон" />
+      <button onclick="submitForm()">Записаться</button>
+    </div>
+  </div>
+
+<script>
+const timesContainer = document.getElementById('times');
+const times = [];
+for (let i = 9; i <= 20; i++) times.push((i < 10 ? '0' + i : i) + ':00');
+
+let selectedTime = null;
+let busySlots = [];
+let duration = 60;
+let serviceName = '';
+let price = 0;
+
+function onServiceChange() {
+  const select = document.getElementById('service');
+  const option = select.options[select.selectedIndex];
+  duration = parseInt(option.dataset.duration);
+  price = parseInt(option.dataset.price);
+  serviceName = option.text;
+
+  document.getElementById('price').innerText = 'Цена: ' + price + '€';
+
+  loadAvailability();
+}
+
+function renderTimes() {
+  timesContainer.innerHTML = '';
+  times.forEach(time => {
+    const div = document.createElement('div');
+    div.className = 'time-slot';
+    div.innerText = time;
+
+    if (isBlocked(time)) {
+      div.classList.add('disabled');
+    } else {
+      div.onclick = () => {
+        document.querySelectorAll('.time-slot').forEach(el => el.classList.remove('active'));
+        div.classList.add('active');
+        selectedTime = time;
+      };
+    }
+
+    timesContainer.appendChild(div);
+  });
+}
+
+function isBlocked(time) {
+  const index = times.indexOf(time);
+  const neededSlots = duration / 60;
+
+  for (let i = 0; i < neededSlots; i++) {
+    if (busySlots.includes(times[index + i])) return true;
+  }
+  return false;
+}
+
+async function loadAvailability() {
+  const date = document.getElementById('date').value;
+  if (!date) return;
+
+  try {
+    const res = await fetch('https://script.google.com/macros/s/AKfycbwqDM6BC52uvWdRgLITroc4sUSKMMGIwguLaIOQWW5stk1388F3Sx-KNtRWAaxcAvM/exec?date=' + date);
+    const data = await res.json();
+    busySlots = data.busy || [];
+    selectedTime = null;
+    renderTimes();
+  } catch {
+    alert('Ошибка загрузки времени');
+  }
+}
+
+async function submitForm() {
+  const name = document.getElementById('name').value;
+  const phone = document.getElementById('phone').value;
+  const date = document.getElementById('date').value;
+
+  if (!name || !phone || !date || !selectedTime || !serviceName) {
+    alert('Заполните все поля');
+    return;
+  }
+
+  const data = { name, phone, date, time: selectedTime, duration, service: serviceName, price };
+
+  try {
+    const res = await fetch('https://script.google.com/macros/s/AKfycbwqDM6BC52uvWdRgLITroc4sUSKMMGIwguLaIOQWW5stk1388F3Sx-KNtRWAaxcAvM/exec', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    });
+
+    const result = await res.json();
+
+    if (result.status === 'busy') {
+      alert('Это время уже занято');
+      loadAvailability();
+      return;
+    }
+
+    alert('Запись добавлена!');
+    loadAvailability();
+  } catch {
+    alert('Ошибка');
+  }
+}
+
+renderTimes();
+</script>
+</body>
+</html>
+
+/* ================= GOOGLE APPS SCRIPT =================
+
+function doGet(e) {
+  const date = e.parameter.date;
+  const calendar = CalendarApp.getDefaultCalendar();
+
+  const start = new Date(date + 'T00:00:00');
+  const end = new Date(date + 'T23:59:59');
+
+  const events = calendar.getEvents(start, end);
+
+  const busy = [];
+
+  events.forEach(ev => {
+    let current = new Date(ev.getStartTime());
+    const endTime = ev.getEndTime();
+
+    while (current < endTime) {
+      const h = current.getHours();
+      busy.push((h < 10 ? '0' + h : h) + ':00');
+      current.setHours(current.getHours() + 1);
+    }
+  });
+
+  return ContentService.createTextOutput(JSON.stringify({ busy }))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function doPost(e) {
+  const data = JSON.parse(e.postData.contents);
+  const calendar = CalendarApp.getDefaultCalendar();
+
+  const start = new Date(data.date + 'T' + data.time + ':00');
+  const end = new Date(start.getTime() + data.duration * 60000);
+
+  const conflicts = calendar.getEvents(start, end);
+  if (conflicts.length > 0) {
+    return ContentService.createTextOutput(JSON.stringify({ status: 'busy' }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+
+  calendar.createEvent(
+    data.service + ' (' + data.price + '€): ' + data.name,
+    start,
+    end,
+    { description: 'Телефон: ' + data.phone }
+  );
+
+  return ContentService.createTextOutput(JSON.stringify({ status: 'success' }))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+==================================================== */
